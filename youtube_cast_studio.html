@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>CastTube for iPad & Big Screen</title>
+  
+  <!-- Apple Touch & Mobile Web App Meta -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CastTube">
+  <meta name="theme-color" content="#0a0d14">
+
+  <!-- Google Fonts & Tailwind CSS -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Phosphor Icons for smooth touch UI -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  
+  <!-- Google Cast SDK -->
+  <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              500: '#E50914',
+              600: '#B81D24',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Prevent accidental rubber-banding in Safari while maintaining scrollability */
+    html, body {
+      overscroll-behavior-y: none;
+      -webkit-tap-highlight-color: transparent;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* iPad Safe Area Insets */
+    .safe-top {
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+    .safe-bottom {
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    .player-ratio {
+      position: relative;
+      width: 100%;
+      padding-bottom: 56.25%; /* 16:9 standard */
+      background: #000;
+    }
+    .player-ratio iframe,
+    .player-ratio #youtube-player {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    /* Standard Google Cast custom launcher */
+    google-cast-launcher {
+      --connected-color: #38bdf8;
+      --disconnected-color: #94a3b8;
+      width: 28px;
+      height: 28px;
+      display: inline-block;
+      cursor: pointer;
+    }
+
+    /* Custom touch-friendly scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[#090d16] text-slate-100 flex flex-col antialiased selection:bg-rose-600 selection:text-white safe-top safe-bottom">
+
+  <header class="h-16 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40 px-4 sm:px-6 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-rose-600 to-red-500 flex items-center justify-center shadow-lg shadow-rose-950/50">
+        <i class="ph-fill ph-television text-white text-xl"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
+          CastTube
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400 font-semibold border border-rose-500/30">iPad Touch</span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Right Header Action items: Cast / AirPlay / Device status -->
+    <div class="flex items-center gap-2 sm:gap-3">
+      <!-- Chromecast Native Button Wrapper -->
+      <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 shadow-inner">
+        <google-cast-launcher id="cast-launcher-btn" title="Google Cast"></google-cast-launcher>
+        <span id="cast-status-label" class="text-xs font-medium text-slate-400 hidden md:inline">Cast待機中</span>
+      </div>
+
+      <!-- Quick AirPlay / Cast Help Modal Trigger -->
+      <button 
+        id="open-cast-guide-btn"
+        class="h-10 px-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 active:scale-95 transition"
+        title="iPadからの接続方法"
+      >
+        <i class="ph-bold ph-broadcast text-sky-400 text-base"></i>
+        <span>キャスト案内</span>
+      </button>
+
+      <!-- Sidebar Toggle for iPad Portrait / compact view -->
+      <button 
+        id="toggle-sidebar-btn" 
+        class="h-10 w-10 lg:hidden rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-300 active:scale-95 transition"
+        title="プレイリスト / 履歴"
+      >
+        <i class="ph-bold ph-list text-lg"></i>
+      </button>
+    </div>
+  </header>
+
+  <main class="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    
+    <!-- Left / Center: Main Player & Controls -->
+    <section class="lg:col-span-8 flex flex-col gap-4">
+      
+      <!-- Video Input Bar (Enhanced for iPad Paste gesture) -->
+      <div class="bg-slate-900/90 rounded-2xl p-2 sm:p-2.5 border border-slate-800 shadow-xl shadow-black/40">
+        <form id="url-form" class="flex flex-col sm:flex-row gap-2">
+          <div class="relative flex-1 flex items-center">
+            <i class="ph ph-magnifying-glass text-slate-400 text-lg absolute left-3.5"></i>
+            <input 
+              type="text" 
+              id="video-url-input" 
+              placeholder="YouTube URLまたはIDを入力 (例: https://youtu.be/...)"
+              class="w-full pl-10 pr-24 py-3 text-sm bg-slate-950/80 rounded-xl text-slate-100 placeholder-slate-500 border border-slate-800/80 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent transition"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+            <button 
+              type="button" 
+              id="quick-paste-btn" 
+              class="absolute right-2 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium active:scale-90 transition flex items-center gap-1"
+            >
+              <i class="ph ph-clipboard-text"></i>
+              <span>ペースト</span>
+            </button>
+          </div>
+
+          <div class="flex gap-2">
+            <button 
+              type="submit" 
+              class="flex-1 sm:flex-none px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2 active:scale-95 transition shrink-0"
+            >
+              <i class="ph-bold ph-play"></i>
+              <span>動画を再生</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="rounded-3xl overflow-hidden bg-slate-950 border border-slate-800/80 shadow-2xl relative transition-all duration-300" id="player-wrapper">
+        <div class="player-ratio relative">
+          <!-- Placeholder before loading -->
+          <div id="player-placeholder" class="absolute inset-0 z-10 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-slate-950/80 to-slate-950/95 backdrop-blur-sm">
+            <div class="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 flex items-center justify-center mb-3">
+              <i class="ph-fill ph-play-circle text-4xl"></i>
+            </div>
+            <h2 class="text-base font-semibold text-slate-100">YouTube動画を待機中</h2>
+            <p class="text-xs text-slate-400 mt-1 max-w-sm">
+              上のバーにURLをペーストするか、下の高画質プリセットから動画を選択するとiPadおよびChromecastで再生が始まります。
+            </p>
+          </div>
+
+          <!-- YouTube Player Container -->
+          <div id="youtube-player"></div>
+        </div>
+
+        <!-- Video Info & iPad Toolbar -->
+        <div class="p-4 bg-slate-900/80 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex-1 min-w-[220px]">
+            <h3 id="current-video-title" class="text-sm font-semibold text-slate-100 truncate">未選択</h3>
+            <div class="flex items-center gap-3 text-xs text-slate-400 font-mono mt-0.5">
+              <span id="current-video-id">ID: --</span>
+              <span id="player-status-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] text-slate-300">停止中</span>
+            </div>
+          </div>
+
+          <!-- Action buttons for iPad -->
+          <div class="flex items-center gap-2">
+            <!-- Save Bookmark -->
+            <button 
+              id="favorite-btn" 
+              class="h-10 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 active:scale-90 transition"
+              title="お気に入りに追加"
+            >
+              <i class="ph ph-heart text-base" id="favorite-icon"></i>
+              <span class="hidden sm:inline">保存</span>
+            </button>
+
+            <!-- Theater Mode toggle -->
+            <button 
+              id="theater-mode-btn" 
+              class="h-10 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 active:scale-90 transition"
+              title="シアターモード切替"
+            >
+              <i class="ph-bold ph-presentation text-base"></i>
+              <span class="hidden sm:inline">シアター</span>
+            </button>
+
+            <!-- iPad Fullscreen Video Button -->
+            <button 
+              id="ipad-fullscreen-btn" 
+              class="h-10 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 active:scale-90 transition"
+              title="全画面拡大"
+            >
+              <i class="ph-bold ph-corners-out text-base"></i>
+              <span>全画面</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-3 pt-1">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i class="ph-bold ph-sparkle text-rose-500"></i>
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-300">iPad おすすめプリセット</h2>
+          </div>
+          <span class="text-[11px] text-slate-500">タップして即座にテスト再生</span>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" id="presets-grid">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </section>
+
+    <aside id="sidebar" class="lg:col-span-4 flex flex-col gap-4">
+      
+      <!-- Quick Cast/AirPlay Guide Card for iPadOS -->
+      <div class="bg-gradient-to-br from-slate-900/90 via-slate-900/50 to-slate-950 p-4 rounded-2xl border border-slate-800 shadow-lg">
+        <div class="flex items-start gap-3">
+          <div class="p-2.5 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 shrink-0">
+            <i class="ph-bold ph-broadcast text-xl"></i>
+          </div>
+          <div class="text-xs space-y-1">
+            <h2 class="font-bold text-slate-200">iPadから大画面へ送るには</h2>
+            <p class="text-slate-400 leading-relaxed text-[11px]">
+              • <strong class="text-white">Chromecastの場合:</strong> iPadの「Chrome」ブラウザからアクセス、またはGoogle Home経由で同一Wi-Fiの画面へ即座に送信できます。<br>
+              • <strong class="text-white">Apple TV / AirPlayの場合:</strong> 動画全画面中の <i class="ph-bold ph-airplay text-slate-300"></i> アイコンやコントロールセンターからキャスト可能です。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabbed List: History & Saved Bookmarks -->
+      <div class="bg-slate-900/90 rounded-2xl border border-slate-800 overflow-hidden flex flex-col h-[460px] shadow-lg">
+        
+        <!-- Tabs Header -->
+        <div class="flex border-b border-slate-800/80 bg-slate-950/60 p-1">
+          <button 
+            id="tab-history" 
+            class="flex-1 py-2.5 text-xs font-semibold rounded-xl bg-slate-800 text-white flex items-center justify-center gap-1.5 transition active:scale-95"
+          >
+            <i class="ph-bold ph-clock-counter-clockwise"></i>
+            <span>再生履歴</span>
+          </button>
+          <button 
+            id="tab-bookmarks" 
+            class="flex-1 py-2.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition active:scale-95"
+          >
+            <i class="ph-bold ph-bookmarks"></i>
+            <span>お気に入り</span>
+          </button>
+        </div>
+
+        <!-- Tab Content Container -->
+        <div class="flex-1 p-3 overflow-y-auto" id="list-container">
+          <!-- Dynamically populated list -->
+        </div>
+
+        <!-- Sidebar footer -->
+        <div class="p-3 border-t border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-xs text-slate-400">
+          <span id="list-count-label">0 件の項目</span>
+          <button id="clear-list-btn" class="text-[11px] text-slate-400 hover:text-rose-400 transition font-medium">
+            全消去
+          </button>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <div id="cast-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 max-w-lg w-full rounded-3xl p-6 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-base text-white flex items-center gap-2">
+          <i class="ph-bold ph-television-simple text-rose-500 text-xl"></i>
+          iPadでのキャスト手順ガイダンス
+        </h3>
+        <button id="close-modal-btn" class="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300">
+          <i class="ph-bold ph-x text-sm"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3.5 text-xs text-slate-300 leading-relaxed">
+        <div class="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80">
+          <div class="font-semibold text-sky-400 mb-1 flex items-center gap-1.5">
+            <i class="ph-bold ph-broadcast"></i> 1. Chromecast を使用する場合
+          </div>
+          <p class="text-slate-400">
+            iPadの<strong>Google Chromeブラウザ</strong>でこのページを開くと、右上のCastアイコンから同じWi-Fi上にあるChromecast / Google TVを選択してキャストできます。
+          </p>
+        </div>
+
+        <div class="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80">
+          <div class="font-semibold text-rose-400 mb-1 flex items-center gap-1.5">
+            <i class="ph-bold ph-airplay"></i> 2. AirPlay / Apple TV を使用する場合
+          </div>
+          <p class="text-slate-400">
+            Safariをご利用の場合、動画を全画面再生した際に表示されるAirPlayアイコン、またはiPadのコントロールセンター右上（画面ミラーリング）からテレビへ投影できます。
+          </p>
+        </div>
+
+        <div class="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80">
+          <div class="font-semibold text-emerald-400 mb-1 flex items-center gap-1.5">
+            <i class="ph-bold ph-wifi-high"></i> 3. 接続の注意点
+          </div>
+          <p class="text-slate-400">
+            iPadとキャスト先の受像機（テレビ / Chromecast）が<strong>同一のWi-Fiネットワーク（SSID）</strong>に接続されていることをご確認ください。
+          </p>
+        </div>
+      </div>
+
+      <button id="dismiss-modal-btn" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl text-xs transition">
+        理解しました
+      </button>
+    </div>
+  </div>
+
+  <div id="toast" class="fixed bottom-6 right-6 z-50 transform translate-y-16 opacity-0 transition-all duration-300 pointer-events-none">
+    <div class="bg-slate-900 border border-slate-700 text-white text-xs px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5">
+      <i id="toast-icon" class="ph-bold ph-check text-emerald-400 text-base"></i>
+      <span id="toast-msg">通知メッセージ</span>
+    </div>
+  </div>
+
+  <script>
+    // State storage
+    const state = {
+      player: null,
+      isApiReady: false,
+      currentVideoId: null,
+      currentVideoTitle: '',
+      activeTab: 'history', // 'history' or 'bookmarks'
+      history: [],
+      bookmarks: [],
+      isTheater: false
+    };
+
+    // Curated high quality presets for instant test on iPad
+    const PRESETS = [
+      { id: 'jfKfPfyJRdk', title: 'Lofi Girl - beats to study to', tag: 'Lofi Chill' },
+      { id: 'Bey4XXJAqS8', title: 'Synthwave Radio - Retro Chill', tag: 'Synthwave' },
+      { id: 'L_LUpnjgPso', title: 'Tropical Island 4K HDR', tag: 'Nature 4K' },
+      { id: 'dQw4w9WgXcQ', title: 'Never Gonna Give You Up', tag: 'Classic' }
+    ];
+
+    // Load LocalStorage
+    try {
+      const savedHist = localStorage.getItem('casttube_history');
+      if (savedHist) state.history = JSON.parse(savedHist);
+      const savedBm = localStorage.getItem('casttube_bookmarks');
+      if (savedBm) state.bookmarks = JSON.parse(savedBm);
+    } catch(e) {
+      console.warn('Storage read warning:', e);
+    }
+
+    // Toast notification helper
+    function showToast(message, isError = false) {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toast-msg');
+      const toastIcon = document.getElementById('toast-icon');
+
+      toastMsg.textContent = message;
+      if (isError) {
+        toastIcon.className = 'ph-bold ph-warning-circle text-rose-500 text-base';
+      } else {
+        toastIcon.className = 'ph-bold ph-check text-emerald-400 text-base';
+      }
+
+      toast.classList.remove('translate-y-16', 'opacity-0');
+      setTimeout(() => {
+        toast.classList.add('translate-y-16', 'opacity-0');
+      }, 3000);
+    }
+
+    // Video ID Parser with Shorts, Embeds, standard & youtu.be support
+    function parseYouTubeId(input) {
+      if (!input) return null;
+      input = input.trim();
+
+      // Direct 11 chars check
+      if (/^[a-zA-Z0-9_-]{11}$/.test(input)) {
+        return input;
+      }
+
+      const regExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([^"&?\/\s]{11})/;
+      const match = input.match(regExp);
+      return (match && match[1]) ? match[1] : null;
+    }
+
+    // Inject YouTube IFrame API
+    const ytScript = document.createElement('script');
+    ytScript.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(ytScript);
+
+    window.onYouTubeIframeAPIReady = function() {
+      state.isApiReady = true;
+      console.log('YouTube IFrame API Initialized');
+    };
+
+    // Load video into iframe
+    function loadVideo(videoId, fallbackTitle = 'YouTube Video') {
+      if (!videoId) return;
+
+      const placeholder = document.getElementById('player-placeholder');
+      if (placeholder) placeholder.style.display = 'none';
+
+      state.currentVideoId = videoId;
+      state.currentVideoTitle = fallbackTitle;
+
+      document.getElementById('current-video-id').textContent = `ID: ${videoId}`;
+      document.getElementById('current-video-title').textContent = fallbackTitle;
+      updateFavoriteButtonState();
+
+      if (!state.player) {
+        state.player = new YT.Player('youtube-player', {
+          videoId: videoId,
+          playerVars: {
+            'autoplay': 1,
+            'playsinline': 1, // Critical for iPadOS inline playback
+            'rel': 0,
+            'modestbranding': 1,
+            'enablejsapi': 1,
+            'origin': window.location.origin
+          },
+          events: {
+            'onReady': (evt) => {
+              evt.target.playVideo();
+              updateTitleFromPlayer();
+              document.getElementById('player-status-badge').textContent = '再生中';
+              document.getElementById('player-status-badge').className = 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-[10px] text-emerald-400 border border-emerald-500/30';
+            },
+            'onStateChange': (evt) => {
+              const badge = document.getElementById('player-status-badge');
+              if (evt.data === YT.PlayerState.PLAYING) {
+                updateTitleFromPlayer();
+                badge.textContent = '再生中';
+                badge.className = 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-[10px] text-emerald-400 border border-emerald-500/30';
+              } else if (evt.data === YT.PlayerState.PAUSED) {
+                badge.textContent = '一時停止';
+                badge.className = 'px-2 py-0.5 rounded-full bg-amber-500/20 text-[10px] text-amber-400 border border-amber-500/30';
+              } else if (evt.data === YT.PlayerState.ENDED) {
+                badge.textContent = '終了';
+                badge.className = 'px-2 py-0.5 rounded-full bg-slate-800 text-[10px] text-slate-300';
+              }
+            }
+          }
+        });
+      } else {
+        state.player.loadVideoById(videoId);
+      }
+
+      addHistoryItem(videoId, fallbackTitle);
+      showToast('動画を読み込みました');
+    }
+
+    // Retrieve full title if available
+    function updateTitleFromPlayer() {
+      try {
+        if (state.player && typeof state.player.getVideoData === 'function') {
+          const data = state.player.getVideoData();
+          if (data && data.title) {
+            state.currentVideoTitle = data.title;
+            document.getElementById('current-video-title').textContent = data.title;
+            // update in history
+            state.history = state.history.map(item => {
+              if (item.id === data.video_id) {
+                return { ...item, title: data.title };
+              }
+              return item;
+            });
+            saveStorage();
+            renderActiveTabList();
+          }
+        }
+      } catch(e) {}
+    }
+
+    // History and Bookmark manager
+    function addHistoryItem(id, title) {
+      state.history = state.history.filter(item => item.id !== id);
+      state.history.unshift({
+        id,
+        title: title || 'YouTube Video',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+      if (state.history.length > 25) state.history.pop();
+      saveStorage();
+      if (state.activeTab === 'history') renderActiveTabList();
+    }
+
+    function toggleBookmark() {
+      if (!state.currentVideoId) {
+        showToast('動画が読み込まれていません', true);
+        return;
+      }
+
+      const index = state.bookmarks.findIndex(b => b.id === state.currentVideoId);
+      if (index >= 0) {
+        state.bookmarks.splice(index, 1);
+        showToast('お気に入りを解除しました');
+      } else {
+        state.bookmarks.unshift({
+          id: state.currentVideoId,
+          title: state.currentVideoTitle || 'YouTube Video',
+          date: new Date().toLocaleDateString()
+        });
+        showToast('お気に入りに追加しました');
+      }
+
+      saveStorage();
+      updateFavoriteButtonState();
+      if (state.activeTab === 'bookmarks') renderActiveTabList();
+    }
+
+    function updateFavoriteButtonState() {
+      const isFav = state.bookmarks.some(b => b.id === state.currentVideoId);
+      const icon = document.getElementById('favorite-icon');
+      if (isFav) {
+        icon.className = 'ph-fill ph-heart text-base text-rose-500';
+      } else {
+        icon.className = 'ph ph-heart text-base text-slate-300';
+      }
+    }
+
+    function saveStorage() {
+      try {
+        localStorage.setItem('casttube_history', JSON.stringify(state.history));
+        localStorage.setItem('casttube_bookmarks', JSON.stringify(state.bookmarks));
+      } catch(e) {}
+    }
+
+    function renderActiveTabList() {
+      const container = document.getElementById('list-container');
+      const countLabel = document.getElementById('list-count-label');
+      const list = state.activeTab === 'history' ? state.history : state.bookmarks;
+
+      countLabel.textContent = `${list.length} 件の項目`;
+
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div class="h-full flex flex-col items-center justify-center text-slate-500 text-center py-12">
+            <i class="ph ${state.activeTab === 'history' ? 'ph-film-strip' : 'ph-bookmark-simple'} text-3xl mb-2 text-slate-600"></i>
+            <span class="text-xs">${state.activeTab === 'history' ? '再生履歴はありません' : 'お気に入りは空です'}</span>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = list.map(item => `
+        <div class="group flex items-center justify-between p-3 rounded-2xl bg-slate-950/60 hover:bg-slate-800/80 border border-slate-800/60 transition cursor-pointer mb-2 active:scale-[0.98]" onclick="loadVideo('${item.id}', '${item.title.replace(/'/g, "\\'")}')">
+          <div class="flex items-center gap-3 overflow-hidden">
+            <div class="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 shrink-0 group-hover:text-rose-400 group-hover:bg-slate-950 transition">
+              <i class="ph-fill ph-play text-sm"></i>
+            </div>
+            <div class="truncate">
+              <div class="text-xs font-medium text-slate-200 truncate group-hover:text-white">${item.title}</div>
+              <div class="text-[10px] text-slate-500 font-mono mt-0.5">${item.id}</div>
+            </div>
+          </div>
+          <button class="p-2 text-slate-500 hover:text-white transition" title="再生">
+            <i class="ph-bold ph-caret-right text-sm"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    // Google Cast SDK Callback
+    window['__onGCastApiAvailable'] = function(isAvailable) {
+      if (isAvailable) {
+        try {
+          cast.framework.CastContext.getInstance().setOptions({
+            receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+            autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+          });
+
+          const context = cast.framework.CastContext.getInstance();
+          const label = document.getElementById('cast-status-label');
+
+          context.addEventListener(
+            cast.framework.CastContextEventType.CAST_STATE_CHANGED,
+            function(event) {
+              switch (event.castState) {
+                case cast.framework.CastState.NO_DEVICES_AVAILABLE:
+                  label.textContent = 'Cast機器未検出';
+                  break;
+                case cast.framework.CastState.NOT_CONNECTED:
+                  label.textContent = 'Cast利用可能';
+                  break;
+                case cast.framework.CastState.CONNECTING:
+                  label.textContent = '接続中...';
+                  break;
+                case cast.framework.CastState.CONNECTED:
+                  label.textContent = 'キャスト中';
+                  showToast('Chromecast接続完了');
+                  break;
+              }
+            }
+          );
+        } catch(err) {
+          console.warn('Cast setup exception:', err);
+        }
+      }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // Populate presets
+      const presetsGrid = document.getElementById('presets-grid');
+      presetsGrid.innerHTML = PRESETS.map(p => `
+        <button 
+          onclick="loadVideo('${p.id}', '${p.title}')"
+          class="flex flex-col text-left p-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800/90 hover:border-rose-500/40 active:scale-95 transition group"
+        >
+          <span class="text-[10px] font-semibold text-rose-400 uppercase tracking-wider">${p.tag}</span>
+          <span class="text-xs text-slate-200 font-medium truncate mt-1 group-hover:text-white">${p.title}</span>
+        </button>
+      `).join('');
+
+      renderActiveTabList();
+
+      // Form submission
+      const form = document.getElementById('url-form');
+      const input = document.getElementById('video-url-input');
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const raw = input.value.trim();
+        const id = parseYouTubeId(raw);
+
+        if (id) {
+          loadVideo(id);
+          input.value = '';
+          input.blur(); // Hide iPad keyboard
+        } else {
+          showToast('有効なYouTubeのURLまたはIDを入力してください', true);
+        }
+      });
+
+      // Quick Paste (Touch optimized for iPad)
+      document.getElementById('quick-paste-btn').addEventListener('click', async () => {
+        try {
+          if (navigator.clipboard && navigator.clipboard.readText) {
+            const clipText = await navigator.clipboard.readText();
+            if (clipText) {
+              input.value = clipText;
+              showToast('ペーストしました');
+              const id = parseYouTubeId(clipText);
+              if (id) loadVideo(id);
+            }
+          } else {
+            input.focus();
+            showToast('長押しして「ペースト」を選択してください');
+          }
+        } catch(e) {
+          input.focus();
+          showToast('クリップボードの利用を許可するか手動で貼り付けてください');
+        }
+      });
+
+      // Tab switcher
+      const tabHistory = document.getElementById('tab-history');
+      const tabBookmarks = document.getElementById('tab-bookmarks');
+
+      tabHistory.addEventListener('click', () => {
+        state.activeTab = 'history';
+        tabHistory.className = 'flex-1 py-2.5 text-xs font-semibold rounded-xl bg-slate-800 text-white flex items-center justify-center gap-1.5 transition';
+        tabBookmarks.className = 'flex-1 py-2.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition';
+        renderActiveTabList();
+      });
+
+      tabBookmarks.addEventListener('click', () => {
+        state.activeTab = 'bookmarks';
+        tabBookmarks.className = 'flex-1 py-2.5 text-xs font-semibold rounded-xl bg-slate-800 text-white flex items-center justify-center gap-1.5 transition';
+        tabHistory.className = 'flex-1 py-2.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition';
+        renderActiveTabList();
+      });
+
+      // Clear list
+      document.getElementById('clear-list-btn').addEventListener('click', () => {
+        if (state.activeTab === 'history') {
+          state.history = [];
+          showToast('履歴を消去しました');
+        } else {
+          state.bookmarks = [];
+          showToast('お気に入りを消去しました');
+        }
+        saveStorage();
+        renderActiveTabList();
+      });
+
+      // Favorite toggle
+      document.getElementById('favorite-btn').addEventListener('click', toggleBookmark);
+
+      // Theater mode toggle
+      const theaterBtn = document.getElementById('theater-mode-btn');
+      const playerWrapper = document.getElementById('player-wrapper');
+      theaterBtn.addEventListener('click', () => {
+        state.isTheater = !state.isTheater;
+        if (state.isTheater) {
+          playerWrapper.classList.add('lg:scale-[1.02]', 'ring-2', 'ring-rose-500/40');
+          showToast('シアターモードを有効化');
+        } else {
+          playerWrapper.classList.remove('lg:scale-[1.02]', 'ring-2', 'ring-rose-500/40');
+          showToast('通常表示に戻しました');
+        }
+      });
+
+      // Fullscreen for iPad Safari / Chrome
+      document.getElementById('ipad-fullscreen-btn').addEventListener('click', () => {
+        const elem = document.querySelector('.player-ratio');
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+          if (elem.requestFullscreen) {
+            elem.requestFullscreen();
+          } else if (elem.webkitRequestFullscreen) {
+            elem.webkitRequestFullscreen();
+          }
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          }
+        }
+      });
+
+      // Toggle Sidebar on small iPad screens
+      const sidebar = document.getElementById('sidebar');
+      document.getElementById('toggle-sidebar-btn').addEventListener('click', () => {
+        sidebar.classList.toggle('hidden');
+        sidebar.scrollIntoView({ behavior: 'smooth' });
+      });
+
+      // Cast guide modal handlers
+      const modal = document.getElementById('cast-modal');
+      const openModal = () => {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      };
+      const closeModal = () => {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      };
+
+      document.getElementById('open-cast-guide-btn').addEventListener('click', openModal);
+      document.getElementById('close-modal-btn').addEventListener('click', closeModal);
+      document.getElementById('dismiss-modal-btn').addEventListener('click', closeModal);
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+      });
+    });
+  </script>
+</body>
+</html>
